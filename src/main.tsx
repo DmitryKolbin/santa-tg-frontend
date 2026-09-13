@@ -22,6 +22,8 @@ import "./style.css";
 const go = (path: string) => {
   location.hash = path;
 };
+const currentPath = () =>
+  location.hash.startsWith("#/") ? location.hash.slice(1) : "/";
 function useAction() {
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -961,15 +963,15 @@ function Chat({ threadKey, gameId }: { threadKey: string; gameId: string }) {
   );
 }
 function App() {
-  const [path, setPath] = useState(location.hash.slice(1) || "/"),
+  const [path, setPath] = useState(currentPath()),
     [notifications, setNotifications] = useState(
       !!tg?.initDataUnsafe.user?.allows_write_to_pm,
     );
   useEffect(() => {
-    if (!location.hash && tg?.initDataUnsafe.start_param)
+    if (tg?.initDataUnsafe.start_param)
       go("/invite/" + encodeURIComponent(tg.initDataUnsafe.start_param));
     const changed = () => {
-      setPath(location.hash.slice(1) || "/");
+      setPath(currentPath());
       window.scrollTo(0, 0);
     };
     window.addEventListener("hashchange", changed);
