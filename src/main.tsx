@@ -15,6 +15,7 @@ import {
   type Profile,
   type Thread,
   type Message,
+  type AnnouncementSummary,
   type Readiness,
 } from "./api";
 import "./style.css";
@@ -455,6 +456,10 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
     [notice, setNotice] = useState("");
   const action = useAction(),
     threads = useLoad<Thread[]>("/games/" + g.id + "/threads");
+  useEffect(() => {
+    const timer = setInterval(threads.reload, 5000);
+    return () => clearInterval(timer);
+  }, [threads.reload]);
   const changed =
     single !== g.single_cycle ||
     mutual !== g.allow_mutual_pairs ||
@@ -472,6 +477,7 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
         {g.single_cycle ? "Одна общая цепочка" : "Любое число цепочек"} ·{" "}
         {g.allow_mutual_pairs ? "Взаимные пары разрешены" : "Без взаимных пар"}
       </p>
+      <Announcements game={g} />
       <ErrorText text={action.error} />
       {notice && (
         <p className="success" role="status">
@@ -692,12 +698,18 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
                   {t.read_only ? " · Архив" : ""}
                 </small>
               </span>
-              <span>→</span>
+              <span className="thread-tail">
+                {t.unread_count > 0 && (
+                  <span className="unread" aria-label="Непрочитанные сообщения">
+                    {t.unread_count}
+                  </span>
+                )}
+                <span aria-hidden="true">→</span>
+              </span>
             </button>
           ))
         )}
       </section>
-      <Announcements game={g} />
       {g.is_owner && g.started && (
         <button
           className="danger full"
@@ -768,14 +780,49 @@ function Receiver({ id }: { id: number }) {
   );
 }
 function Announcements({ game }: { game: Game }) {
-  const [text, setText] = useState(""),
+  const [expanded, setExpanded] = useState(false),
+    [text, setText] = useState(""),
     [version, setVersion] = useState(0),
-    action = useAction();
+    action = useAction(),
+    summary = useLoad<AnnouncementSummary>(
+      "/games/" + game.id + "/announcements/latest",
+    );
+  useEffect(() => {
+    const timer = setInterval(summary.reload, 5000);
+    return () => clearInterval(timer);
+  }, [summary.reload]);
   return (
-    <section className="panel">
-      <h2>От организатора</h2>
-      <Feed path={"/games/" + game.id + "/announcements"} version={version} />
-      {game.is_owner && (
+    <section className="panel announcements">
+      <button
+        type="button"
+        className="announcement-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span>
+          <strong>От организатора</strong>
+          <small className="announcement-preview">
+            {summary.data?.latest?.text || "Объявлений пока нет"}
+          </small>
+        </span>
+        <span className="thread-tail">
+          {!expanded && (summary.data?.unread_count ?? 0) > 0 && (
+            <span className="unread" aria-label="Непрочитанные объявления">
+              {summary.data!.unread_count}
+            </span>
+          )}
+          <span aria-hidden="true">{expanded ? "↑" : "↓"}</span>
+        </span>
+      </button>
+      <ErrorText text={summary.error} />
+      {expanded && (
+        <Feed
+          path={"/games/" + game.id + "/announcements"}
+          version={version}
+          onLoad={summary.reload}
+        />
+      )}
+      {expanded && game.is_owner && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -785,6 +832,7 @@ function Announcements({ game }: { game: Game }) {
               });
               setText("");
               setVersion((v) => v + 1);
+              summary.reload();
             });
           }}
         >
@@ -809,10 +857,12 @@ function Feed({
   path,
   polling = true,
   version = 0,
+  onLoad,
 }: {
   path: string;
   polling?: boolean;
   version?: number;
+  onLoad?: () => void;
 }) {
   const [messages, setMessages] = useState<Message[]>([]),
     [error, setError] = useState(""),
@@ -838,6 +888,7 @@ function Feed({
           }
         } while (batch.length === 100);
         setError("");
+        onLoad?.();
       } catch (e) {
         if (!stopped)
           setError(
@@ -859,7 +910,7 @@ function Feed({
       clearInterval(interval);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [path, polling, version]);
+  }, [path, polling, version, onLoad]);
   return (
     <div className="feed" aria-live="polite">
       <ErrorText text={error || action.error} />
@@ -892,6 +943,86 @@ function Feed({
         ))
       )}
     </div>
+  );
+}
+function Delivery({ thread, reload }: { thread: Thread; reload: () => void }) {
+  const [tracking, setTracking] = useState(thread.tracking_number),
+    action = useAction();
+  useEffect(() => setTracking(thread.tracking_number), [thread.tracking_number]);
+  return (
+    <section className="panel delivery">
+      <h2>Доставка подарка</h2>
+      {thread.side === "receiver" ? (
+        <>
+          {thread.received && (
+            <p className="success">Получатель забрал подарок ✓</p>
+          )}
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void action.run(async () => {
+                await api("/threads/" + thread.key + "/tracking", "PUT", {
+                  tracking_number: tracking,
+                });
+                reload();
+              });
+            }}
+          >
+            <label>
+              Трек-номер
+              <input
+                required
+                maxLength={200}
+                disabled={thread.received}
+                value={tracking}
+                onChange={(event) => setTracking(event.target.value)}
+                placeholder="Введите номер отправления"
+              />
+            </label>
+            <ErrorText text={action.error} />
+            <button
+              className="secondary"
+              disabled={
+                action.busy ||
+                thread.received ||
+                tracking.trim() === thread.tracking_number
+              }
+            >
+              {thread.tracking_number ? "Сохранить новый номер" : "Сохранить номер"}
+            </button>
+          </form>
+        </>
+      ) : (
+        <>
+          <p>
+            {thread.tracking_number ? (
+              <>
+                Трек-номер: <strong>{thread.tracking_number}</strong>
+              </>
+            ) : (
+              <span className="muted">Санта пока не добавил трек-номер.</span>
+            )}
+          </p>
+          <ErrorText text={action.error} />
+          <button
+            className={thread.received ? "secondary" : ""}
+            disabled={action.busy}
+            onClick={() =>
+              void action.run(async () => {
+                await api("/threads/" + thread.key + "/received", "POST", {
+                  received: !thread.received,
+                });
+                reload();
+              })
+            }
+          >
+            {thread.received
+              ? "Отменить подтверждение"
+              : "Я забрал(а) подарок ✓"}
+          </button>
+        </>
+      )}
+    </section>
   );
 }
 function Chat({ threadKey, gameId }: { threadKey: string; gameId: string }) {
@@ -947,6 +1078,7 @@ function Chat({ threadKey, gameId }: { threadKey: string; gameId: string }) {
           : "Получатель не видит вашего имени. Не раскрывайте себя в сообщениях и файлах."}
       </p>
       <ErrorText text={error} />
+      <Delivery thread={thread} reload={reload} />
       <Feed path={"/threads/" + threadKey + "/messages"} version={version} />
       {thread.read_only ? (
         <p className="warning">Архив розыгрыша. Только для чтения.</p>

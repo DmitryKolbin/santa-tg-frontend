@@ -465,6 +465,57 @@ legend {
   font-weight: 400;
   margin-top: 6px;
 }
+.thread-tail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.unread {
+  display: inline-flex;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+}
+.announcements {
+  border-color: var(--accent);
+}
+.announcement-toggle {
+  display: flex;
+  width: 100%;
+  padding: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+  background: none;
+  color: var(--ink);
+}
+.announcement-toggle > span:first-child {
+  min-width: 0;
+}
+.announcement-preview {
+  display: -webkit-box;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 400;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.delivery {
+  margin-top: 18px;
+}
+.delivery form {
+  margin-bottom: 0;
+}
 .bubble {
   margin: 12px 30px 12px 0;
   background: var(--panel);

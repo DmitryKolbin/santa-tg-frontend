@@ -95,6 +95,9 @@ export interface Thread {
   round: number;
   side: "santa" | "receiver";
   counterpart_name?: string;
+  tracking_number: string;
+  received: boolean;
+  unread_count: number;
   read_only: boolean;
 }
 export interface Message {
@@ -105,6 +108,10 @@ export interface Message {
   file_name?: string;
   file_type?: string;
   created: string;
+}
+export interface AnnouncementSummary {
+  latest?: Message;
+  unread_count: number;
 }
 export interface Readiness {
   exclusions: string;
