@@ -406,6 +406,13 @@ legend {
 .warning {
   color: var(--accent);
 }
+.problems ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.problems li + li {
+  margin-top: 6px;
+}
 .success {
   color: var(--green);
 }

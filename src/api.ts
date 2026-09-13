@@ -91,8 +91,10 @@ export interface Profile {
 }
 export interface Thread {
   key: string;
+  game_name: string;
   round: number;
   side: "santa" | "receiver";
+  counterpart_name?: string;
   read_only: boolean;
 }
 export interface Message {
@@ -108,6 +110,7 @@ export interface Readiness {
   exclusions: string;
   members: { name: string; missing: string[]; wishlist_empty: boolean }[];
   excluded: string[];
+  problems: string[];
   ready: boolean;
   error?: string;
 }

@@ -622,6 +622,16 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
                 </div>
               ))}
               <ErrorText text={report.error} />
+              {report.problems.length > 0 && (
+                <div className="warning problems" role="alert">
+                  <strong>Почему не получается</strong>
+                  <ul>
+                    {report.problems.map((problem) => (
+                      <li key={problem}>{problem}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {report.excluded.length > 0 && force && (
                 <p className="warning">
                   Будут исключены: {report.excluded.join(", ")}
@@ -674,9 +684,11 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
               onClick={() => go("/chat/" + t.key + "/" + g.id)}
             >
               <span>
-                {t.side === "santa" ? "✦ Мой Санта" : "🎁 Мой получатель"}
+                {t.side === "santa"
+                  ? "✦ Ваш тайный Санта"
+                  : "🎁 Получатель: " + t.counterpart_name}
                 <small>
-                  Розыгрыш № {t.round}
+                  {t.game_name} · розыгрыш №{t.round}
                   {t.read_only ? " · Архив" : ""}
                 </small>
               </span>
@@ -922,8 +934,12 @@ function Chat({ threadKey, gameId }: { threadKey: string; gameId: string }) {
   if (!thread) return <ErrorText text="Диалог не найден" />;
   return (
     <>
-      <PageTitle eyebrow={"РОЗЫГРЫШ № " + thread.round}>
-        {thread.side === "santa" ? "Мой Санта" : "Мой получатель"}
+      <PageTitle
+        eyebrow={thread.game_name + " · РОЗЫГРЫШ №" + thread.round}
+      >
+        {thread.side === "santa"
+          ? "Ваш тайный Санта"
+          : "Получатель: " + thread.counterpart_name}
       </PageTitle>
       <p className="muted">
         {thread.side === "santa"
@@ -937,7 +953,9 @@ function Chat({ threadKey, gameId }: { threadKey: string; gameId: string }) {
       ) : (
         <form className="composer" onSubmit={submit}>
           <label>
-            Сообщение
+            {thread.side === "santa"
+              ? "Сообщение вашему тайному Санте"
+              : "Сообщение для " + thread.counterpart_name}
             <textarea
               maxLength={4000}
               value={text}
