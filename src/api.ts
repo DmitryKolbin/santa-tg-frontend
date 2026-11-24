@@ -79,6 +79,8 @@ export interface Game {
   single_cycle: boolean;
   allow_mutual_pairs: boolean;
   started: boolean;
+  /** Archived by the organizer; chats keep working, the setup is frozen. */
+  finished: boolean;
   round: number;
   is_owner: boolean;
   is_member: boolean;

@@ -238,6 +238,9 @@ function Unread({ count, label }: { count: number; label: string }) {
     </span>
   ) : null;
 }
+function gameStatus(g: Pick<Game, "started" | "finished">) {
+  return g.finished ? "завершена" : g.started ? "дарим подарки" : "набор";
+}
 function rulesText(single: boolean, mutual: boolean) {
   return (
     (single ? "одна цепочка" : "можно несколько цепочек") +
@@ -291,6 +294,8 @@ function Settings({
 }
 function Home() {
   const { data, error, reload } = useLoad<Game[]>("/games");
+  const active = data?.filter((g) => !g.finished) ?? [],
+    archived = data?.filter((g) => g.finished) ?? [];
   return (
     <>
       <PageTitle
@@ -318,35 +323,59 @@ function Home() {
               </p>
             </div>
           ) : (
-            <div className="list">
-              {data.map((g) => (
-                <Row
-                  key={g.id}
-                  onClick={() => go("/game/" + g.id)}
-                  title={g.name}
-                  subtitle={
-                    g.count +
-                    " " +
-                    plural(g.count, "участник", "участника", "участников") +
-                    " · " +
-                    (g.is_owner ? "вы организатор" : g.creator_name)
-                  }
-                  tail={
-                    g.missing?.length ? (
-                      <span className="badge warn">⚠️ заполните анкету</span>
-                    ) : (
-                      <span className={"badge" + (g.started ? " done" : "")}>
-                        {g.started ? "пары готовы" : "набор"}
-                      </span>
-                    )
-                  }
-                />
-              ))}
-            </div>
+            <>
+              {active.length > 0 ? (
+                <GameList games={active} />
+              ) : (
+                <p className="card hint">
+                  Текущих игр нет. Завершённые лежат в архиве.
+                </p>
+              )}
+              {archived.length > 0 && (
+                <details className="section archive">
+                  <summary className="section-title">
+                    Архив · {archived.length}
+                  </summary>
+                  <GameList games={archived} />
+                </details>
+              )}
+            </>
           )}
         </>
       )}
     </>
+  );
+}
+function GameList({ games }: { games: Game[] }) {
+  return (
+    <div className="list">
+      {games.map((g) => (
+        <Row
+          key={g.id}
+          muted={g.finished}
+          onClick={() => go("/game/" + g.id)}
+          title={g.name}
+          subtitle={
+            g.count +
+            " " +
+            plural(g.count, "участник", "участника", "участников") +
+            " · " +
+            (g.is_owner ? "вы организатор" : g.creator_name)
+          }
+          tail={
+            g.missing?.length ? (
+              <span className="badge warn">⚠️ заполните анкету</span>
+            ) : (
+              <span
+                className={"badge" + (g.started && !g.finished ? " done" : "")}
+              >
+                {gameStatus(g)}
+              </span>
+            )
+          }
+        />
+      ))}
+    </div>
   );
 }
 function ProfilePage() {
@@ -543,7 +572,10 @@ function Invite({ token }: { token: string }) {
       error,
       reload,
     } = useLoad<
-      Pick<Game, "id" | "name" | "creator_name" | "started" | "is_member">
+      Pick<
+        Game,
+        "id" | "name" | "creator_name" | "started" | "finished" | "is_member"
+      >
     >("/invites/" + encodeURIComponent(token)),
     action = useAction();
   return (
@@ -556,11 +588,18 @@ function Invite({ token }: { token: string }) {
           <div className="card invite">
             <h2>{g.name}</h2>
             <p className="hint">Организатор: {g.creator_name}</p>
-            {g.started && !g.is_member && (
-              <p className="warning">Жеребьёвка уже прошла, вступить нельзя.</p>
+            {g.finished && !g.is_member ? (
+              <p className="warning">Игра завершена, вступить нельзя.</p>
+            ) : (
+              g.started &&
+              !g.is_member && (
+                <p className="warning">
+                  Жеребьёвка уже прошла, вступить нельзя.
+                </p>
+              )
             )}
           </div>
-          {!g.is_member && !g.started && (
+          {!g.is_member && !g.started && !g.finished && (
             <p className="section-footer">
               Перед жеребьёвкой заполните анкету: адрес и куда готовы отправить
               подарок.
@@ -569,7 +608,9 @@ function Invite({ token }: { token: string }) {
           <ErrorText text={action.error} />
           <button
             className="full"
-            disabled={action.busy || (g.started && !g.is_member)}
+            disabled={
+              action.busy || ((g.started || g.finished) && !g.is_member)
+            }
             onClick={() =>
               void action.run(async () => {
                 if (!g.is_member)
@@ -597,7 +638,7 @@ function GamePage({ id }: { id: string }) {
     <>
       <ErrorText text={error} />
       <GameDetails
-        key={g.id + ":" + g.round + ":" + g.started}
+        key={g.id + ":" + g.round + ":" + g.started + ":" + g.finished}
         g={g}
         reload={reload}
       />
@@ -620,13 +661,39 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
         subtitle={
           <>
             {g.count} из {MAX_MEMBERS} ·{" "}
-            {g.started ? "пары готовы" : "идёт набор"}
+            {g.finished
+              ? "игра завершена"
+              : g.started
+                ? "дарим подарки"
+                : "идёт набор"}
             {g.round > 1 && " · розыгрыш №" + g.round}
             <br />
             {rulesText(g.single_cycle, g.allow_mutual_pairs)}
           </>
         }
       />
+      {g.finished && (
+        <div className="card finished-note">
+          <strong>🏁 Игра завершена и лежит в архиве</strong>
+          <p className="hint">
+            Переписка, трек-номера и объявления продолжают работать.
+          </p>
+          {g.is_owner && (
+            <button
+              className="secondary full"
+              disabled={action.busy}
+              onClick={() =>
+                void action.run(async () => {
+                  await api("/games/" + g.id + "/reopen", "POST", {});
+                  reload();
+                })
+              }
+            >
+              Вернуть из архива
+            </button>
+          )}
+        </div>
+      )}
       {g.missing && g.missing.length > 0 && (
         <MissingProfile missing={g.missing} />
       )}
@@ -658,8 +725,12 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
           </div>
         </Section>
       )}
-      {g.is_owner && !g.started && g.invite_url && <InviteLink game={g} />}
-      {g.is_owner && !g.started && <DrawPanel g={g} reload={reload} />}
+      {g.is_owner && !g.started && !g.finished && g.invite_url && (
+        <InviteLink game={g} />
+      )}
+      {g.is_owner && !g.started && !g.finished && (
+        <DrawPanel g={g} reload={reload} />
+      )}
       {archive.length > 0 && (
         <details className="section archive">
           <summary className="section-title">Прошлые розыгрыши</summary>
@@ -667,7 +738,7 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
         </details>
       )}
       <ErrorText text={action.error} />
-      {g.is_owner && g.started && (
+      {g.is_owner && g.started && !g.finished && (
         <button
           className="danger full"
           disabled={action.busy}
@@ -685,6 +756,26 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
           }
         >
           Сбросить жеребьёвку
+        </button>
+      )}
+      {g.is_owner && !g.finished && (
+        <button
+          className="danger full"
+          disabled={action.busy}
+          onClick={() =>
+            void action.run(async () => {
+              if (
+                !window.confirm(
+                  "Завершить игру? Она уйдёт в архив у всех участников, бот пришлёт уведомление. Переписка продолжит работать.",
+                )
+              )
+                return;
+              await api("/games/" + g.id + "/finish", "POST", {});
+              reload();
+            })
+          }
+        >
+          Завершить игру
         </button>
       )}
     </>
