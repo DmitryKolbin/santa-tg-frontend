@@ -931,3 +931,13 @@ nav button[aria-current="page"] span {
   cursor: pointer;
   font-size: 16px;
 }
+
+.list + .archive {
+  margin-top: 18px;
+}
+.finished-note {
+  margin-bottom: 16px;
+}
+.finished-note p {
+  margin-top: 4px;
+}
