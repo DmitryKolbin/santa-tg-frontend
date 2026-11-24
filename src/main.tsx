@@ -14,6 +14,7 @@ import {
   download,
   tg,
   type Game,
+  type GameMember,
   type Profile,
   type Thread,
   type Message,
@@ -261,8 +262,8 @@ function Settings({
         <span>
           Одна цепочка
           <small>
-            Все дарят по кругу: А → Б → В → А. Если выключить, может
-            получиться несколько отдельных кругов.
+            Все дарят по кругу: А → Б → В → А. Если выключить, может получиться
+            несколько отдельных кругов.
           </small>
         </span>
         <input
@@ -331,9 +332,13 @@ function Home() {
                     (g.is_owner ? "вы организатор" : g.creator_name)
                   }
                   tail={
-                    <span className={"badge" + (g.started ? " done" : "")}>
-                      {g.started ? "пары готовы" : "набор"}
-                    </span>
+                    g.missing?.length ? (
+                      <span className="badge warn">⚠️ заполните анкету</span>
+                    ) : (
+                      <span className={"badge" + (g.started ? " done" : "")}>
+                        {g.started ? "пары готовы" : "набор"}
+                      </span>
+                    )
                   }
                 />
               ))}
@@ -552,15 +557,13 @@ function Invite({ token }: { token: string }) {
             <h2>{g.name}</h2>
             <p className="hint">Организатор: {g.creator_name}</p>
             {g.started && !g.is_member && (
-              <p className="warning">
-                Жеребьёвка уже прошла, вступить нельзя.
-              </p>
+              <p className="warning">Жеребьёвка уже прошла, вступить нельзя.</p>
             )}
           </div>
           {!g.is_member && !g.started && (
             <p className="section-footer">
-              Перед жеребьёвкой заполните анкету: адрес и куда готовы
-              отправить подарок.
+              Перед жеребьёвкой заполните анкету: адрес и куда готовы отправить
+              подарок.
             </p>
           )}
           <ErrorText text={action.error} />
@@ -624,6 +627,9 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
           </>
         }
       />
+      {g.missing && g.missing.length > 0 && (
+        <MissingProfile missing={g.missing} />
+      )}
       {g.started && g.is_member && <Receiver id={g.id} />}
       {(g.started || archive.length > 0) && (
         <Section title="Переписка">
@@ -652,9 +658,7 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
           </div>
         </Section>
       )}
-      {g.is_owner && !g.started && g.invite_url && (
-        <InviteLink game={g} />
-      )}
+      {g.is_owner && !g.started && g.invite_url && <InviteLink game={g} />}
       {g.is_owner && !g.started && <DrawPanel g={g} reload={reload} />}
       {archive.length > 0 && (
         <details className="section archive">
@@ -686,7 +690,32 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
     </>
   );
 }
-function ThreadList({ threads, gameId }: { threads: Thread[]; gameId: number }) {
+function MissingProfile({ missing }: { missing: string[] }) {
+  return (
+    <div className="alert-card" role="alert">
+      <div className="alert-icon" aria-hidden="true">
+        ⚠️
+      </div>
+      <div className="alert-body">
+        <strong>Анкета не заполнена</strong>
+        <p>
+          Не хватает: {missing.map((m) => m.toLowerCase()).join(", ")}. Пока
+          анкета не заполнена, вы не попадёте в жеребьёвку.
+        </p>
+        <button className="small" onClick={() => go("/profile")}>
+          Заполнить анкету
+        </button>
+      </div>
+    </div>
+  );
+}
+function ThreadList({
+  threads,
+  gameId,
+}: {
+  threads: Thread[];
+  gameId: number;
+}) {
   return (
     <div className="list">
       {threads.map((t) => (
@@ -772,6 +801,7 @@ function DrawPanel({ g, reload }: { g: Game; reload: () => void }) {
     [report, setReport] = useState<Readiness>(),
     [force, setForce] = useState(false),
     [notice, setNotice] = useState(""),
+    members = useLoad<GameMember[]>("/games/" + g.id + "/members"),
     action = useAction();
   const changed =
     single !== g.single_cycle ||
@@ -836,6 +866,15 @@ function DrawPanel({ g, reload }: { g: Game; reload: () => void }) {
           </p>
         )}
       </Section>
+      <MembersPanel
+        g={g}
+        members={members}
+        onChange={() => {
+          setReport(undefined);
+          members.reload();
+          reload();
+        }}
+      />
       <Section
         title="Жеребьёвка"
         footer={changed ? "Сначала сохраните изменения." : undefined}
@@ -852,20 +891,6 @@ function DrawPanel({ g, reload }: { g: Game; reload: () => void }) {
             />
             Не включать тех, кто не заполнил анкету
           </label>
-          {report && (
-            <div className="readiness">
-              {report.members.map((m, i) => (
-                <div className="member" key={i}>
-                  <span>{m.name}</span>
-                  <small className={m.missing.length ? "bad" : "ok"}>
-                    {m.missing.length
-                      ? "нет: " + m.missing.join(", ")
-                      : "готов" + (m.wishlist_empty ? ", без пожеланий" : "")}
-                  </small>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
         {report && (
           <>
@@ -896,15 +921,16 @@ function DrawPanel({ g, reload }: { g: Game; reload: () => void }) {
             className="secondary"
             disabled={action.busy || changed}
             onClick={() =>
-              void action.run(async () =>
+              void action.run(async () => {
+                members.reload();
                 setReport(
                   await api<Readiness>(
                     "/games/" + g.id + "/readiness",
                     "POST",
                     { force },
                   ),
-                ),
-              )
+                );
+              })
             }
           >
             Проверить
@@ -945,6 +971,129 @@ function DrawPanel({ g, reload }: { g: Game; reload: () => void }) {
     </>
   );
 }
+function memberStatus(m: GameMember) {
+  return m.missing.length
+    ? "нет: " + m.missing.map((f) => f.toLowerCase()).join(", ")
+    : "анкета заполнена" + (m.wishlist_empty ? ", без пожеланий" : "");
+}
+function MembersPanel({
+  g,
+  members,
+  onChange,
+}: {
+  g: Game;
+  members: { data?: GameMember[]; error: string; reload: () => void };
+  onChange: () => void;
+}) {
+  const action = useAction(),
+    list = members.data ?? [],
+    names = new Map(list.map((m) => [m.id, m.name])),
+    incomplete = list.filter((m) => m.missing.length > 0).length;
+  const change = (method: string, path: string, body?: unknown) =>
+    void action.run(async () => {
+      await api(path, method, body);
+      onChange();
+    });
+  return (
+    <Section
+      title={"Участники" + (incomplete ? " · без анкеты: " + incomplete : "")}
+      footer="Запреты видите только вы. Запрет односторонний: «Аня не дарит Пете» не мешает Пете дарить Ане."
+    >
+      {!members.data ? (
+        <Loading error={members.error} retry={members.reload} />
+      ) : list.length === 0 ? (
+        <p className="card hint">Пока никто не присоединился.</p>
+      ) : (
+        <div className="list">
+          {list.map((m) => {
+            const options = list.filter(
+              (other) => other.id !== m.id && !m.blocked.includes(other.id),
+            );
+            return (
+              <div className="member-card" key={m.id}>
+                <div className="member-head">
+                  <span className="row-main">
+                    <strong>{m.name}</strong>
+                    <small className={m.missing.length ? "bad" : "ok"}>
+                      {m.missing.length ? "⚠️ " : "✓ "}
+                      {memberStatus(m)}
+                    </small>
+                  </span>
+                  <button
+                    className="link-button danger-link"
+                    disabled={action.busy}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          "Исключить «" +
+                            m.name +
+                            "» из игры? Бот пришлёт уведомление, запреты с этим участником удалятся.",
+                        )
+                      )
+                        change("DELETE", "/games/" + g.id + "/members/" + m.id);
+                    }}
+                  >
+                    Исключить
+                  </button>
+                </div>
+                {(m.blocked.length > 0 || options.length > 0) && (
+                  <div className="blocked">
+                    {m.blocked.length > 0 && (
+                      <span className="hint">Не дарит:</span>
+                    )}
+                    {m.blocked.map((id) => (
+                      <span className="chip" key={id}>
+                        {names.get(id)}
+                        <button
+                          className="chip-remove"
+                          aria-label={"Снять запрет: " + names.get(id)}
+                          disabled={action.busy}
+                          onClick={() =>
+                            change(
+                              "DELETE",
+                              "/games/" + g.id + "/blocked/" + m.id + "/" + id,
+                            )
+                          }
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                    {options.length > 0 && (
+                      <label className="chip add">
+                        + Не дарит…
+                        <select
+                          aria-label={"Кому " + m.name + " не дарит"}
+                          value=""
+                          disabled={action.busy}
+                          onChange={(e) =>
+                            e.target.value &&
+                            change("POST", "/games/" + g.id + "/blocked", {
+                              sender: m.id,
+                              receiver: Number(e.target.value),
+                            })
+                          }
+                        >
+                          <option value="">Выберите участника</option>
+                          {options.map((o) => (
+                            <option key={o.id} value={o.id}>
+                              {o.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <ErrorText text={action.error} />
+    </Section>
+  );
+}
 function Receiver({ id }: { id: number }) {
   const { data, error, reload } = useLoad<{
       name: string;
@@ -963,9 +1112,7 @@ function Receiver({ id }: { id: number }) {
               {data.wishlist ? (
                 <Expandable text={data.wishlist} />
               ) : (
-                <p className="hint">
-                  Не указаны. Можно спросить в переписке.
-                </p>
+                <p className="hint">Не указаны. Можно спросить в переписке.</p>
               )}
             </div>
             <div className="field">
@@ -1200,9 +1347,7 @@ function Feed({
                     className="attachment"
                     disabled={action.busy}
                     onClick={() =>
-                      void action.run(() =>
-                        download(m.file_key!, m.file_name!),
-                      )
+                      void action.run(() => download(m.file_key!, m.file_name!))
                     }
                   >
                     <span aria-hidden="true">📎</span> {m.file_name}
@@ -1220,7 +1365,10 @@ function Feed({
 function Delivery({ thread, reload }: { thread: Thread; reload: () => void }) {
   const [tracking, setTracking] = useState(thread.tracking_number),
     action = useAction();
-  useEffect(() => setTracking(thread.tracking_number), [thread.tracking_number]);
+  useEffect(
+    () => setTracking(thread.tracking_number),
+    [thread.tracking_number],
+  );
   if (thread.side === "receiver")
     return (
       <div className="delivery">
@@ -1268,7 +1416,8 @@ function Delivery({ thread, reload }: { thread: Thread; reload: () => void }) {
             <span className="ok">✓ Подарок получен</span>
           ) : thread.tracking_number ? (
             <>
-              Трек-номер: <strong className="select">{thread.tracking_number}</strong>
+              Трек-номер:{" "}
+              <strong className="select">{thread.tracking_number}</strong>
             </>
           ) : (
             <span className="hint">Трек-номера пока нет</span>
@@ -1404,9 +1553,7 @@ function Chat({ threadKey, gameId }: { threadKey: string; gameId: string }) {
   return (
     <div className="chat">
       <div className="chat-head">
-        <h1>
-          {isSanta ? "🎁 " + thread.counterpart_name : "🎅 Тайный Санта"}
-        </h1>
+        <h1>{isSanta ? "🎁 " + thread.counterpart_name : "🎅 Тайный Санта"}</h1>
         <p className="hint">
           {isSanta
             ? "Вы дарите. Ваше имя скрыто, не подписывайтесь."
@@ -1429,9 +1576,14 @@ function Chat({ threadKey, gameId }: { threadKey: string; gameId: string }) {
         }
       />
       {thread.read_only ? (
-        <p className="archive-note">Это архив прошлого розыгрыша, писать сюда нельзя.</p>
+        <p className="archive-note">
+          Это архив прошлого розыгрыша, писать сюда нельзя.
+        </p>
       ) : (
-        <Composer threadKey={threadKey} onSent={() => setVersion((v) => v + 1)} />
+        <Composer
+          threadKey={threadKey}
+          onSent={() => setVersion((v) => v + 1)}
+        />
       )}
     </div>
   );
