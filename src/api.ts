@@ -84,6 +84,16 @@ export interface Game {
   is_member: boolean;
   count: number;
   invite_url?: string;
+  /** What the current user still has to fill in to be drawn. */
+  missing?: string[];
+}
+export interface GameMember {
+  id: number;
+  name: string;
+  missing: string[];
+  wishlist_empty: boolean;
+  /** Members this one will not be assigned to give a gift to. */
+  blocked: number[];
 }
 export interface Profile {
   name: string;

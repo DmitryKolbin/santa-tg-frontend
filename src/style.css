@@ -22,7 +22,10 @@
 }
 :root {
   --bg: var(--tg-theme-secondary-bg-color, var(--fb-bg));
-  --card: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, var(--fb-card)));
+  --card: var(
+    --tg-theme-section-bg-color,
+    var(--tg-theme-bg-color, var(--fb-card))
+  );
   --text: var(--tg-theme-text-color, var(--fb-text));
   --hint: var(--tg-theme-hint-color, var(--fb-hint));
   --link: var(--tg-theme-link-color, var(--fb-link));
@@ -42,11 +45,7 @@
     var(--tg-content-safe-area-inset-bottom, 0px)
   );
   font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "SF Pro Text",
-    Roboto,
-    "Segoe UI",
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Segoe UI",
     sans-serif;
   font-size: 15px;
   line-height: 1.4;
@@ -267,6 +266,10 @@ main {
 .badge.done {
   color: var(--ok);
 }
+.badge.warn {
+  color: var(--warn);
+  font-weight: 600;
+}
 .unread {
   display: inline-flex;
   min-width: 20px;
@@ -325,7 +328,8 @@ textarea {
 }
 select.card-input {
   appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, var(--hint) 50%),
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--hint) 50%),
     linear-gradient(135deg, var(--hint) 50%, transparent 50%);
   background-position:
     right 18px center,
@@ -826,4 +830,104 @@ nav button[aria-current="page"] span {
   * {
     transition: none !important;
   }
+}
+
+/* Questionnaire warning shown to a member who cannot be drawn yet */
+.alert-card {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 14%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.alert-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+.alert-body {
+  flex: 1;
+  min-width: 0;
+}
+.alert-body strong {
+  display: block;
+  color: var(--warn);
+  font-size: 16px;
+}
+.alert-body p {
+  margin: 4px 0 10px;
+  font-size: 14px;
+}
+
+/* Organizer's member list with blocked pairs */
+.member-card {
+  position: relative;
+  padding: 10px 12px 10px 14px;
+}
+.member-card + .member-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 0;
+  border-top: 1px solid var(--sep);
+}
+.member-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.member-head .row-main small.bad {
+  color: var(--warn);
+}
+.member-head .row-main small.ok {
+  color: var(--ok);
+}
+.danger-link {
+  color: var(--danger);
+  padding: 0;
+  flex-shrink: 0;
+}
+.blocked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 14px;
+  background: var(--bg);
+  font-size: 13px;
+}
+.chip-remove {
+  background: none;
+  color: var(--hint);
+  min-height: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 50%;
+}
+.chip.add {
+  position: relative;
+  padding: 3px 10px;
+  background: var(--soft);
+  color: var(--btn);
+  font-weight: 500;
+  cursor: pointer;
+}
+.chip.add select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px;
 }
