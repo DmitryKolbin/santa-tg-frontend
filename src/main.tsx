@@ -1,10 +1,12 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
   type ReactNode,
+  type TextareaHTMLAttributes,
 } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -20,6 +22,7 @@ import {
 } from "./api";
 import "./style.css";
 
+const MAX_MEMBERS = 50;
 const go = (path: string) => {
   location.hash = path;
 };
@@ -68,6 +71,78 @@ function useLoad<T>(path: string) {
   }, [path, version]);
   return { data, error, reload };
 }
+function plural(n: number, one: string, few: string, many: string) {
+  const d = n % 10,
+    h = n % 100;
+  if (d === 1 && h !== 11) return one;
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return few;
+  return many;
+}
+// Textarea that grows with its content instead of scrolling inside a small box.
+function AutoTextarea({
+  minRows = 3,
+  ...props
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { minRows?: number }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, [props.value]);
+  return <textarea ref={ref} rows={minRows} {...props} />;
+}
+const urlPattern = /(https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]»])/g;
+function shortURL(url: string) {
+  const bare = url.replace(/^https?:\/\/(www\.)?/, "");
+  return bare.length > 32 ? bare.slice(0, 30) + "…" : bare;
+}
+// Linkify renders plain text with http(s) URLs as links opened outside the Mini App.
+function Linkify({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(urlPattern).map((part, i) =>
+        i % 2 ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              if (tg?.openLink) {
+                e.preventDefault();
+                tg.openLink(part);
+              }
+            }}
+          >
+            {shortURL(part)}
+          </a>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
+function Expandable({ text, lines = 8 }: { text: string; lines?: number }) {
+  const [open, setOpen] = useState(false),
+    long = text.length > 400 || text.split("\n").length > lines;
+  return (
+    <>
+      <p
+        className={"preserve" + (long && !open ? " clamped" : "")}
+        style={{ WebkitLineClamp: lines }}
+      >
+        <Linkify text={text} />
+      </p>
+      {long && (
+        <button className="link-button" onClick={() => setOpen(!open)}>
+          {open ? "Свернуть" : "Показать полностью"}
+        </button>
+      )}
+    </>
+  );
+}
 function ErrorText({ text }: { text?: string }) {
   return text ? (
     <p className="error" role="alert">
@@ -77,32 +152,96 @@ function ErrorText({ text }: { text?: string }) {
 }
 function Loading({ error, retry }: { error?: string; retry?: () => void }) {
   return error ? (
-    <>
+    <div className="loading">
       <ErrorText text={error} />
       {retry && (
-        <button className="secondary" onClick={retry}>
+        <button className="secondary small" onClick={retry}>
           Повторить
         </button>
       )}
-    </>
+    </div>
   ) : (
-    <p role="status" className="muted">
-      Загружаем…
+    <p role="status" className="hint loading">
+      Загрузка…
     </p>
   );
 }
 function PageTitle({
-  eyebrow,
-  children,
+  title,
+  subtitle,
+  action,
 }: {
-  eyebrow: string;
-  children: ReactNode;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  action?: ReactNode;
 }) {
   return (
     <div className="page-title">
-      <span className="eyebrow">{eyebrow}</span>
-      <h1>{children}</h1>
+      <div>
+        <h1>{title}</h1>
+        {subtitle && <p className="hint">{subtitle}</p>}
+      </div>
+      {action}
     </div>
+  );
+}
+function Section({
+  title,
+  footer,
+  children,
+}: {
+  title?: ReactNode;
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="section">
+      {title && <h2 className="section-title">{title}</h2>}
+      {children}
+      {footer && <p className="section-footer">{footer}</p>}
+    </section>
+  );
+}
+function Row({
+  title,
+  subtitle,
+  tail,
+  onClick,
+  muted,
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  tail?: ReactNode;
+  onClick: () => void;
+  muted?: boolean;
+}) {
+  return (
+    <button className={"row" + (muted ? " muted" : "")} onClick={onClick}>
+      <span className="row-main">
+        <strong>{title}</strong>
+        {subtitle && <small>{subtitle}</small>}
+      </span>
+      <span className="row-tail">
+        {tail}
+        <span className="chevron" aria-hidden="true">
+          ›
+        </span>
+      </span>
+    </button>
+  );
+}
+function Unread({ count, label }: { count: number; label: string }) {
+  return count > 0 ? (
+    <span className="unread" aria-label={label}>
+      {count}
+    </span>
+  ) : null;
+}
+function rulesText(single: boolean, mutual: boolean) {
+  return (
+    (single ? "одна цепочка" : "можно несколько цепочек") +
+    ", " +
+    (mutual ? "взаимные пары разрешены" : "без взаимных пар")
   );
 }
 function Settings({
@@ -117,13 +256,13 @@ function Settings({
   setMutual: (value: boolean) => void;
 }) {
   return (
-    <fieldset className="settings">
-      <legend>Правила жеребьёвки</legend>
+    <>
       <label className="toggle">
         <span>
-          <strong>Только одна цепочка</strong>
+          Одна цепочка
           <small>
-            Все дарят по кругу. Выключите, чтобы разрешить несколько кругов.
+            Все дарят по кругу: А → Б → В → А. Если выключить, может
+            получиться несколько отдельных кругов.
           </small>
         </span>
         <input
@@ -134,10 +273,10 @@ function Settings({
       </label>
       <label className="toggle">
         <span>
-          <strong>Разрешить взаимные пары</strong>
+          Взаимные пары
           <small>
-            А дарит Б, а Б дарит А. Без этого в игре должно быть минимум три
-            человека.
+            А дарит Б, а Б дарит А. Если выключить, нужно минимум трое
+            участников.
           </small>
         </span>
         <input
@@ -146,71 +285,59 @@ function Settings({
           onChange={(e) => setMutual(e.target.checked)}
         />
       </label>
-    </fieldset>
+    </>
   );
 }
 function Home() {
   const { data, error, reload } = useLoad<Game[]>("/games");
   return (
     <>
-      <section className="hero">
-        <span className="eyebrow">МАЛЕНЬКИЙ СЕКРЕТ. БОЛЬШАЯ РАДОСТЬ.</span>
-        <h1>
-          Кто-то ждёт
-          <br />
-          вашего <em>чуда.</em>
-        </h1>
-        <div className="gift" aria-hidden="true">
-          <span>✦</span>🎁<span>✧</span>
-        </div>
-        <p>
-          Соберите близких. Мы поможем каждому
-          <br />
-          найти того, кого он порадует.
-        </p>
-        <button onClick={() => go("/new")}>＋ Создать игру</button>
-      </section>
-      <div className="section-heading">
-        <h2>Мои игры</h2>
-        <button className="text-button" onClick={reload}>
-          Обновить
-        </button>
-      </div>
+      <PageTitle
+        title="Мои игры"
+        subtitle={<span className="festive">❄ Тайный Санта</span>}
+        action={
+          <button className="small" onClick={() => go("/new")}>
+            + Новая игра
+          </button>
+        }
+      />
       {!data ? (
         <Loading error={error} retry={reload} />
       ) : (
         <>
           <ErrorText text={error} />
           {data.length === 0 ? (
-            <div className="empty">
-              Здесь пока тихо.
-              <p>Создайте первую игру или откройте ссылку от организатора.</p>
+            <div className="card empty">
+              <div className="empty-icon" aria-hidden="true">
+                🎄
+              </div>
+              <p>Игр пока нет.</p>
+              <p className="hint">
+                Создайте новую или откройте ссылку-приглашение от организатора.
+              </p>
             </div>
           ) : (
-            data.map((g) => (
-              <button
-                className="game-card"
-                key={g.id}
-                onClick={() => go("/game/" + g.id)}
-              >
-                <span className="card-icon" aria-hidden="true">
-                  {g.started ? "🎁" : "✦"}
-                </span>
-                <span>
-                  <strong>{g.name}</strong>
-                  <small>
-                    {g.count} участников ·{" "}
-                    {g.is_owner ? "Вы организатор" : g.creator_name}
-                  </small>
-                  <span className={"badge " + (g.started ? "green" : "")}>
-                    {g.started
-                      ? "Подарки нашли адресатов"
-                      : "Собираем участников"}
-                  </span>
-                </span>
-                <span aria-hidden="true">↗</span>
-              </button>
-            ))
+            <div className="list">
+              {data.map((g) => (
+                <Row
+                  key={g.id}
+                  onClick={() => go("/game/" + g.id)}
+                  title={g.name}
+                  subtitle={
+                    g.count +
+                    " " +
+                    plural(g.count, "участник", "участника", "участников") +
+                    " · " +
+                    (g.is_owner ? "вы организатор" : g.creator_name)
+                  }
+                  tail={
+                    <span className={"badge" + (g.started ? " done" : "")}>
+                      {g.started ? "пары готовы" : "набор"}
+                    </span>
+                  }
+                />
+              ))}
+            </div>
           )}
         </>
       )}
@@ -222,10 +349,10 @@ function ProfilePage() {
     locations = useLoad<Record<string, string>>("/locations");
   return (
     <>
-      <PageTitle eyebrow="НЕМНОГО О ВАС">Мой wishlist</PageTitle>
-      <p className="muted">
-        Помогите вашему Санте выбрать подарок. Анкета общая для всех игр.
-      </p>
+      <PageTitle
+        title="Анкета"
+        subtitle="Одна на все игры. Адрес и пожелания видит только тот, кто дарит подарок вам."
+      />
       {data && locations.data ? (
         <ProfileForm initial={data} locations={locations.data} />
       ) : (
@@ -265,72 +392,85 @@ function ProfileForm({
         });
       }}
     >
-      <label>
-        Адрес для подарка
-        <textarea
+      <Section title="Адрес доставки">
+        <AutoTextarea
+          className="card-input"
+          aria-label="Адрес доставки"
           required
           maxLength={2000}
-          rows={3}
+          minRows={2}
           value={value.address}
           onChange={(e) => change({ address: e.target.value })}
-          placeholder="Страна, город, индекс, адрес и имя получателя"
+          placeholder="Страна, город, индекс, улица, ФИО получателя"
         />
-      </label>
-      <label>
-        Что вас порадует?
-        <textarea
+      </Section>
+      <Section
+        title="Пожелания"
+        footer={
+          value.wishlist.length > 3000
+            ? value.wishlist.length + " из 4000 символов"
+            : "Необязательно, но Санте так будет проще. Ссылки станут кликабельными."
+        }
+      >
+        <AutoTextarea
+          className="card-input"
+          aria-label="Пожелания"
           maxLength={4000}
-          rows={5}
+          minRows={4}
           value={value.wishlist}
           onChange={(e) => change({ wishlist: e.target.value })}
-          placeholder="Любимые вещи, интересы, ссылки. И что лучше не дарить."
+          placeholder={
+            "Что нравится, размеры, чего не дарить.\nМожно списком и со ссылками на товары."
+          }
         />
-      </label>
-      <small className="muted">
-        Wishlist необязателен, но очень поможет вашему Санте.
-      </small>
-      <label>
-        Где вы находитесь
+      </Section>
+      <Section title="Где вы живёте">
         <select
+          className="card-input"
+          aria-label="Где вы живёте"
           required
           value={value.location}
           onChange={(e) => change({ location: e.target.value })}
         >
-          <option value="">Выберите локацию</option>
+          <option value="">Выберите</option>
           {Object.entries(locations).map(([code, name]) => (
             <option key={code} value={code}>
               {name}
             </option>
           ))}
         </select>
-      </label>
-      <fieldset>
-        <legend>Куда можете отправить подарок</legend>
-        {Object.entries(locations).map(([code, name]) => (
-          <label className="check" key={code}>
-            <input
-              type="checkbox"
-              checked={value.destinations.includes(code)}
-              onChange={(e) =>
-                change({
-                  destinations: e.target.checked
-                    ? [...value.destinations, code]
-                    : value.destinations.filter((d) => d !== code),
-                })
-              }
-            />
-            {name}
-          </label>
-        ))}
-      </fieldset>
+      </Section>
+      <Section
+        title="Куда готовы отправить подарок"
+        footer="По этим направлениям подбираются пары."
+      >
+        <div className="card list-card">
+          {Object.entries(locations).map(([code, name]) => (
+            <label className="check" key={code}>
+              <input
+                type="checkbox"
+                checked={value.destinations.includes(code)}
+                onChange={(e) =>
+                  change({
+                    destinations: e.target.checked
+                      ? [...value.destinations, code]
+                      : value.destinations.filter((d) => d !== code),
+                  })
+                }
+              />
+              {name}
+            </label>
+          ))}
+        </div>
+      </Section>
       <ErrorText text={action.error} />
       {saved && (
         <p role="status" className="success">
-          Анкета сохранена ✓
+          Сохранено
         </p>
       )}
-      <button disabled={action.busy}>
-        {action.busy ? "Сохраняем…" : "Сохранить анкету"}
+      <button className="full" disabled={action.busy}>
+        {action.busy ? "Сохраняем…" : "Сохранить"}
       </button>
     </form>
   );
@@ -342,7 +482,7 @@ function NewGame() {
     action = useAction();
   return (
     <>
-      <PageTitle eyebrow="СОБЕРИТЕ СВОИХ">Новая игра</PageTitle>
+      <PageTitle title="Новая игра" />
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -356,30 +496,38 @@ function NewGame() {
           });
         }}
       >
-        <label>
-          Название
+        <Section title="Название">
           <input
+            className="card-input"
+            aria-label="Название"
             required
             maxLength={120}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Например, Зимние чудеса"
+            placeholder="Например, Новый год 2027"
           />
-        </label>
-        <Settings
-          single={single}
-          mutual={mutual}
-          setSingle={setSingle}
-          setMutual={setMutual}
-        />
+        </Section>
+        <Section
+          title="Правила жеребьёвки"
+          footer={
+            "До " +
+            MAX_MEMBERS +
+            " участников. Организатор сам в игру не попадает: если тоже хотите дарить, вступите по своей ссылке."
+          }
+        >
+          <div className="card list-card">
+            <Settings
+              single={single}
+              mutual={mutual}
+              setSingle={setSingle}
+              setMutual={setMutual}
+            />
+          </div>
+        </Section>
         <ErrorText text={action.error} />
-        <button disabled={action.busy}>
-          {action.busy ? "Создаём…" : "Создать и пригласить"}
+        <button className="full" disabled={action.busy}>
+          {action.busy ? "Создаём…" : "Создать"}
         </button>
-        <p className="muted">
-          До 50 участников. Чтобы дарить подарки самому, вступите в игру по
-          своей ссылке.
-        </p>
       </form>
     </>
   );
@@ -395,23 +543,29 @@ function Invite({ token }: { token: string }) {
     action = useAction();
   return (
     <>
-      <PageTitle eyebrow="ВАС ПРИГЛАСИЛИ">Время дарить</PageTitle>
+      <PageTitle title="Приглашение" />
       {!g ? (
         <Loading error={error} retry={reload} />
       ) : (
-        <section className="panel invite">
-          <div className="large-icon" aria-hidden="true">
-            💌
+        <>
+          <div className="card invite">
+            <h2>{g.name}</h2>
+            <p className="hint">Организатор: {g.creator_name}</p>
+            {g.started && !g.is_member && (
+              <p className="warning">
+                Жеребьёвка уже прошла, вступить нельзя.
+              </p>
+            )}
           </div>
-          <h2>{g.name}</h2>
-          <p>Организатор: {g.creator_name}</p>
-          <p className="muted">
-            {g.started
-              ? "Жеребьёвка уже прошла."
-              : "Один подарок от вас. Один сюрприз для вас."}
-          </p>
+          {!g.is_member && !g.started && (
+            <p className="section-footer">
+              Перед жеребьёвкой заполните анкету: адрес и куда готовы
+              отправить подарок.
+            </p>
+          )}
           <ErrorText text={action.error} />
           <button
+            className="full"
             disabled={action.busy || (g.started && !g.is_member)}
             onClick={() =>
               void action.run(async () => {
@@ -425,9 +579,9 @@ function Invite({ token }: { token: string }) {
               })
             }
           >
-            {g.is_member ? "Открыть игру" : "Присоединиться"}
+            {g.is_member ? "Открыть игру" : "Вступить"}
           </button>
-        </section>
+        </>
       )}
     </>
   );
@@ -448,106 +602,194 @@ function GamePage({ id }: { id: string }) {
   );
 }
 function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
-  const [single, setSingle] = useState(g.single_cycle),
-    [mutual, setMutual] = useState(g.allow_mutual_pairs),
-    [name, setName] = useState(g.name);
-  const [report, setReport] = useState<Readiness>(),
-    [force, setForce] = useState(false),
-    [notice, setNotice] = useState("");
   const action = useAction(),
     threads = useLoad<Thread[]>("/games/" + g.id + "/threads");
   useEffect(() => {
     const timer = setInterval(threads.reload, 5000);
     return () => clearInterval(timer);
   }, [threads.reload]);
+  const current = threads.data?.filter((t) => !t.read_only) ?? [],
+    archive = threads.data?.filter((t) => t.read_only) ?? [];
+  return (
+    <>
+      <PageTitle
+        title={g.name}
+        subtitle={
+          <>
+            {g.count} из {MAX_MEMBERS} ·{" "}
+            {g.started ? "пары готовы" : "идёт набор"}
+            {g.round > 1 && " · розыгрыш №" + g.round}
+            <br />
+            {rulesText(g.single_cycle, g.allow_mutual_pairs)}
+          </>
+        }
+      />
+      {g.started && g.is_member && <Receiver id={g.id} />}
+      {(g.started || archive.length > 0) && (
+        <Section title="Переписка">
+          {!threads.data ? (
+            <Loading error={threads.error} retry={threads.reload} />
+          ) : current.length === 0 ? (
+            <p className="card hint">Вас нет в этом розыгрыше.</p>
+          ) : (
+            <ThreadList threads={current} gameId={g.id} />
+          )}
+        </Section>
+      )}
+      <Announcements game={g} />
+      {g.is_member && (
+        <Section>
+          <div className="list">
+            <Row
+              title="Моя анкета"
+              subtitle={
+                g.started
+                  ? "Если поменяете адрес, Санта получит уведомление"
+                  : "Заполните до жеребьёвки"
+              }
+              onClick={() => go("/profile")}
+            />
+          </div>
+        </Section>
+      )}
+      {g.is_owner && !g.started && g.invite_url && (
+        <InviteLink game={g} />
+      )}
+      {g.is_owner && !g.started && <DrawPanel g={g} reload={reload} />}
+      {archive.length > 0 && (
+        <details className="section archive">
+          <summary className="section-title">Прошлые розыгрыши</summary>
+          <ThreadList threads={archive} gameId={g.id} />
+        </details>
+      )}
+      <ErrorText text={action.error} />
+      {g.is_owner && g.started && (
+        <button
+          className="danger full"
+          disabled={action.busy}
+          onClick={() =>
+            void action.run(async () => {
+              if (
+                !window.confirm(
+                  "Сбросить жеребьёвку? Пары перестанут действовать, переписка уйдёт в архив.",
+                )
+              )
+                return;
+              await api("/games/" + g.id + "/reset", "POST", {});
+              reload();
+            })
+          }
+        >
+          Сбросить жеребьёвку
+        </button>
+      )}
+    </>
+  );
+}
+function ThreadList({ threads, gameId }: { threads: Thread[]; gameId: number }) {
+  return (
+    <div className="list">
+      {threads.map((t) => (
+        <Row
+          key={t.key}
+          muted={t.read_only}
+          onClick={() => go("/chat/" + t.key + "/" + gameId)}
+          title={
+            t.side === "receiver"
+              ? "🎁 " + t.counterpart_name
+              : "🎅 Тайный Санта"
+          }
+          subtitle={
+            (t.side === "receiver" ? "вы дарите" : "дарит вам") +
+            (t.read_only ? " · розыгрыш №" + t.round : "") +
+            (t.received ? " · подарок получен" : "")
+          }
+          tail={<Unread count={t.unread_count} label="Непрочитанные" />}
+        />
+      ))}
+    </div>
+  );
+}
+function InviteLink({ game: g }: { game: Game }) {
+  const [copied, setCopied] = useState(false),
+    action = useAction();
+  return (
+    <Section
+      title="Приглашение"
+      footer="Отправьте ссылку тем, кто будет участвовать."
+    >
+      <div className="card">
+        <input
+          className="link-input"
+          readOnly
+          aria-label="Ссылка приглашения"
+          value={g.invite_url}
+          onFocus={(e) => e.target.select()}
+        />
+        <div className="button-row">
+          <button
+            className="secondary small"
+            onClick={() =>
+              void action.run(async () => {
+                await navigator.clipboard.writeText(g.invite_url!);
+                setCopied(true);
+              })
+            }
+          >
+            {copied ? "Скопировано" : "Скопировать"}
+          </button>
+          <button
+            className="small"
+            onClick={() =>
+              tg?.openTelegramLink(
+                "https://t.me/share/url?url=" +
+                  encodeURIComponent(g.invite_url!) +
+                  "&text=" +
+                  encodeURIComponent("Тайный Санта «" + g.name + "»"),
+              )
+            }
+          >
+            Поделиться
+          </button>
+        </div>
+        {!g.is_member && (
+          <button
+            className="link-button"
+            onClick={() => go("/invite/" + g.invite_url!.split("startapp=")[1])}
+          >
+            Участвовать самому
+          </button>
+        )}
+        <ErrorText text={action.error} />
+      </div>
+    </Section>
+  );
+}
+function DrawPanel({ g, reload }: { g: Game; reload: () => void }) {
+  const [single, setSingle] = useState(g.single_cycle),
+    [mutual, setMutual] = useState(g.allow_mutual_pairs),
+    [name, setName] = useState(g.name),
+    [report, setReport] = useState<Readiness>(),
+    [force, setForce] = useState(false),
+    [notice, setNotice] = useState(""),
+    action = useAction();
   const changed =
     single !== g.single_cycle ||
     mutual !== g.allow_mutual_pairs ||
     name !== g.name;
   return (
     <>
-      <PageTitle eyebrow={"РОЗЫГРЫШ № " + g.round}>{g.name}</PageTitle>
-      <div className="chips">
-        <span className="badge">{g.count}/50 участников</span>
-        <span className="badge">
-          {g.started ? "Жеребьёвка завершена" : "Ждём участников"}
-        </span>
-      </div>
-      <p className="muted">
-        {g.single_cycle ? "Одна общая цепочка" : "Любое число цепочек"} ·{" "}
-        {g.allow_mutual_pairs ? "Взаимные пары разрешены" : "Без взаимных пар"}
-      </p>
-      <Announcements game={g} />
-      <ErrorText text={action.error} />
-      {notice && (
-        <p className="success" role="status">
-          {notice}
-        </p>
-      )}
-      {g.is_owner && g.invite_url && (
-        <section className="panel">
-          <h2>Вместе веселее</h2>
-          <p className="muted">Игра доступна только по приглашению.</p>
-          <label>
-            Ссылка приглашения
-            <input
-              readOnly
-              value={g.invite_url}
-              onFocus={(e) => e.target.select()}
-            />
-          </label>
-          <div className="button-row">
-            <button
-              className="secondary"
-              onClick={() =>
-                void action.run(async () => {
-                  await navigator.clipboard.writeText(g.invite_url!);
-                  setNotice("Ссылка скопирована");
-                })
-              }
-            >
-              Копировать
-            </button>
-            <button
-              onClick={() =>
-                tg?.openTelegramLink(
-                  "https://t.me/share/url?url=" +
-                    encodeURIComponent(g.invite_url!) +
-                    "&text=" +
-                    encodeURIComponent("Присоединяйтесь к «" + g.name + "»!"),
-                )
-              }
-            >
-              Пригласить ↗
-            </button>
-          </div>
-          {!g.is_member && !g.started && (
-            <button
-              className="text-button"
-              onClick={() =>
-                go("/invite/" + g.invite_url!.split("startapp=")[1])
-              }
-            >
-              Я тоже хочу участвовать
-            </button>
-          )}
-        </section>
-      )}
-      {g.is_member && (
-        <button className="secondary full" onClick={() => go("/profile")}>
-          Моя анкета и wishlist ↗
-        </button>
-      )}
-      {g.started && g.is_member && <Receiver id={g.id} />}
-      {g.is_owner && !g.started && (
-        <section className="panel">
-          <h2>Подготовка игры</h2>
-          <label>
+      <Section title="Настройки">
+        <div className="card list-card">
+          <label className="inline-field">
             Название
             <input
               maxLength={120}
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setNotice("");
+              }}
             />
           </label>
           <Settings
@@ -556,35 +798,49 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
             setSingle={(v) => {
               setSingle(v);
               setReport(undefined);
+              setNotice("");
             }}
             setMutual={(v) => {
               setMutual(v);
               setReport(undefined);
+              setNotice("");
             }}
           />
-          {changed && (
-            <button
-              className="secondary full"
-              disabled={action.busy}
-              onClick={() =>
-                void action.run(async () => {
-                  const saved = await api<Game>("/games/" + g.id, "PATCH", {
-                    name,
-                    single_cycle: single,
-                    allow_mutual_pairs: mutual,
-                  });
-                  setReport(undefined);
-                  reload();
-                  setName(saved.name);
-                  setSingle(saved.single_cycle);
-                  setMutual(saved.allow_mutual_pairs);
-                  setNotice("Настройки сохранены");
-                })
-              }
-            >
-              Сохранить настройки
-            </button>
-          )}
+        </div>
+        {changed && (
+          <button
+            className="secondary full"
+            disabled={action.busy}
+            onClick={() =>
+              void action.run(async () => {
+                const saved = await api<Game>("/games/" + g.id, "PATCH", {
+                  name,
+                  single_cycle: single,
+                  allow_mutual_pairs: mutual,
+                });
+                setReport(undefined);
+                reload();
+                setName(saved.name);
+                setSingle(saved.single_cycle);
+                setMutual(saved.allow_mutual_pairs);
+                setNotice("Сохранено");
+              })
+            }
+          >
+            Сохранить изменения
+          </button>
+        )}
+        {notice && (
+          <p className="success" role="status">
+            {notice}
+          </p>
+        )}
+      </Section>
+      <Section
+        title="Жеребьёвка"
+        footer={changed ? "Сначала сохраните изменения." : undefined}
+      >
+        <div className="card list-card">
           <label className="check">
             <input
               type="checkbox"
@@ -594,10 +850,50 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
                 setReport(undefined);
               }}
             />
-            Исключить незаполненные анкеты
+            Не включать тех, кто не заполнил анкету
           </label>
+          {report && (
+            <div className="readiness">
+              {report.members.map((m, i) => (
+                <div className="member" key={i}>
+                  <span>{m.name}</span>
+                  <small className={m.missing.length ? "bad" : "ok"}>
+                    {m.missing.length
+                      ? "нет: " + m.missing.join(", ")
+                      : "готов" + (m.wishlist_empty ? ", без пожеланий" : "")}
+                  </small>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {report && (
+          <>
+            <ErrorText text={report.error} />
+            {report.problems.length > 0 && (
+              <div className="warning problems" role="alert">
+                <strong>Что мешает</strong>
+                <ul>
+                  {report.problems.map((problem) => (
+                    <li key={problem}>{problem}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {report.excluded.length > 0 && force && (
+              <p className="warning">
+                Не попадут в розыгрыш: {report.excluded.join(", ")}
+              </p>
+            )}
+            {report.ready && (
+              <p className="success">Всё готово, можно проводить.</p>
+            )}
+          </>
+        )}
+        <ErrorText text={action.error} />
+        <div className="button-row">
           <button
-            className="secondary full"
+            className="secondary"
             disabled={action.busy || changed}
             onClick={() =>
               void action.run(async () =>
@@ -611,45 +907,9 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
               )
             }
           >
-            Проверить готовность
+            Проверить
           </button>
-          {report && (
-            <div className="readiness">
-              <h3>Готовность участников</h3>
-              {report.members.map((m, i) => (
-                <div className="member" key={i}>
-                  <strong>{m.name}</strong>
-                  <small>
-                    {m.missing.length
-                      ? "Не заполнено: " + m.missing.join(", ")
-                      : "Готово ✓"}
-                    {m.wishlist_empty ? " · Без wishlist" : ""}
-                  </small>
-                </div>
-              ))}
-              <ErrorText text={report.error} />
-              {report.problems.length > 0 && (
-                <div className="warning problems" role="alert">
-                  <strong>Почему не получается</strong>
-                  <ul>
-                    {report.problems.map((problem) => (
-                      <li key={problem}>{problem}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {report.excluded.length > 0 && force && (
-                <p className="warning">
-                  Будут исключены: {report.excluded.join(", ")}
-                </p>
-              )}
-              {report.ready && (
-                <p className="success">Распределение возможно ✓</p>
-              )}
-            </div>
-          )}
           <button
-            className="full"
             disabled={action.busy || changed || !report?.ready}
             onClick={() =>
               void action.run(async () => {
@@ -661,9 +921,15 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
                 setReport(latest);
                 if (!latest.ready) return;
                 const exclusion = latest.excluded.length
-                  ? "\nБудут исключены: " + latest.excluded.join(", ")
+                  ? "\nНе попадут в розыгрыш: " + latest.excluded.join(", ")
                   : "";
-                if (!window.confirm("Провести жеребьёвку?" + exclusion)) return;
+                if (
+                  !window.confirm(
+                    "Провести жеребьёвку? Поменять пары потом можно только сбросом." +
+                      exclusion,
+                  )
+                )
+                  return;
                 await api("/games/" + g.id + "/draw", "POST", {
                   force,
                   exclusions: latest.exclusions,
@@ -672,111 +938,61 @@ function GameDetails({ g, reload }: { g: Game; reload: () => void }) {
               })
             }
           >
-            {action.busy ? "Проверяем…" : "✦ Провести жеребьёвку"}
+            {action.busy ? "Секунду…" : "Провести"}
           </button>
-        </section>
-      )}
-      <section className="panel">
-        <h2>Тайная переписка</h2>
-        {!threads.data ? (
-          <Loading error={threads.error} retry={threads.reload} />
-        ) : threads.data.length === 0 ? (
-          <p className="muted">Диалоги появятся после жеребьёвки.</p>
-        ) : (
-          threads.data.map((t) => (
-            <button
-              key={t.key}
-              className="thread-button"
-              onClick={() => go("/chat/" + t.key + "/" + g.id)}
-            >
-              <span>
-                {t.side === "santa"
-                  ? "✦ Ваш тайный Санта"
-                  : "🎁 Получатель: " + t.counterpart_name}
-                <small>
-                  {t.game_name} · розыгрыш №{t.round}
-                  {t.read_only ? " · Архив" : ""}
-                </small>
-              </span>
-              <span className="thread-tail">
-                {t.unread_count > 0 && (
-                  <span className="unread" aria-label="Непрочитанные сообщения">
-                    {t.unread_count}
-                  </span>
-                )}
-                <span aria-hidden="true">→</span>
-              </span>
-            </button>
-          ))
-        )}
-      </section>
-      {g.is_owner && g.started && (
-        <button
-          className="danger full"
-          disabled={action.busy}
-          onClick={() =>
-            void action.run(async () => {
-              if (
-                !window.confirm(
-                  "Сбросить жеребьёвку? Старые назначения перестанут действовать, переписка станет архивной.",
-                )
-              )
-                return;
-              await api("/games/" + g.id + "/reset", "POST", {});
-              reload();
-            })
-          }
-        >
-          Сбросить жеребьёвку
-        </button>
-      )}
-      <button
-        className="text-button"
-        onClick={() => {
-          reload();
-          threads.reload();
-        }}
-      >
-        Обновить игру
-      </button>
+        </div>
+      </Section>
     </>
   );
 }
 function Receiver({ id }: { id: number }) {
   const { data, error, reload } = useLoad<{
-    name: string;
-    address: string;
-    wishlist: string;
-  }>("/games/" + id + "/receiver");
+      name: string;
+      address: string;
+      wishlist: string;
+    }>("/games/" + id + "/receiver"),
+    [copied, setCopied] = useState(false);
   return (
-    <section className="panel recipient">
-      <span className="eyebrow">ВАШ МАЛЕНЬКИЙ СЕКРЕТ</span>
-      <h2>Вы дарите подарок…</h2>
-      {data ? (
-        <>
-          <h3>{data.name}</h3>
-          <small>Адрес</small>
-          <p className="preserve">{data.address}</p>
-          <small>Wishlist</small>
-          <p className="preserve">
-            {data.wishlist || "Получатель оставил выбор вам."}
+    <Section title="Вы дарите">
+      <div className="card recipient">
+        {data ? (
+          <>
+            <div className="recipient-name">{data.name}</div>
+            <div className="field">
+              <small>Пожелания</small>
+              {data.wishlist ? (
+                <Expandable text={data.wishlist} />
+              ) : (
+                <p className="hint">
+                  Не указаны. Можно спросить в переписке.
+                </p>
+              )}
+            </div>
+            <div className="field">
+              <small>Адрес</small>
+              <p className="preserve">{data.address}</p>
+              <button
+                className="link-button"
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(data.address)
+                    .then(() => setCopied(true))
+                }
+              >
+                {copied ? "Скопировано" : "Скопировать адрес"}
+              </button>
+            </div>
+          </>
+        ) : error === "Не найдено" ? (
+          <p className="hint">
+            Вас нет в этом розыгрыше: скорее всего, анкета не была заполнена.
+            Напишите организатору.
           </p>
-        </>
-      ) : (
-        <>
-          <p className="muted">
-            {error === "Не найдено"
-              ? "Вы не включены в этот розыгрыш. Проверьте анкету и обратитесь к организатору."
-              : error || "Открываем конверт…"}
-          </p>
-          {error && error !== "Не найдено" && (
-            <button className="text-button" onClick={reload}>
-              Повторить
-            </button>
-          )}
-        </>
-      )}
-    </section>
+        ) : (
+          <Loading error={error} retry={error ? reload : undefined} />
+        )}
+      </div>
+    </Section>
   );
 }
 function Announcements({ game }: { game: Game }) {
@@ -791,89 +1007,120 @@ function Announcements({ game }: { game: Game }) {
     const timer = setInterval(summary.reload, 5000);
     return () => clearInterval(timer);
   }, [summary.reload]);
+  const latest = summary.data?.latest;
+  if (summary.data && !latest && !game.is_owner) return null;
   return (
-    <section className="panel announcements">
-      <button
-        type="button"
-        className="announcement-toggle"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <span>
-          <strong>От организатора</strong>
-          <small className="announcement-preview">
-            {summary.data?.latest?.text || "Объявлений пока нет"}
-          </small>
-        </span>
-        <span className="thread-tail">
-          {!expanded && (summary.data?.unread_count ?? 0) > 0 && (
-            <span className="unread" aria-label="Непрочитанные объявления">
-              {summary.data!.unread_count}
-            </span>
-          )}
-          <span aria-hidden="true">{expanded ? "↑" : "↓"}</span>
-        </span>
-      </button>
-      <ErrorText text={summary.error} />
-      {expanded && (
-        <Feed
-          path={"/games/" + game.id + "/announcements"}
-          version={version}
-          onLoad={summary.reload}
-        />
-      )}
-      {expanded && game.is_owner && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void action.run(async () => {
-              await api("/games/" + game.id + "/announcements", "POST", {
-                text,
-              });
-              setText("");
-              setVersion((v) => v + 1);
-              summary.reload();
-            });
-          }}
+    <Section title="Объявления организатора">
+      <div className="card announcements">
+        <button
+          type="button"
+          className="announcement-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
         >
-          <label>
-            Объявление
-            <textarea
+          <span className="announcement-preview">
+            {latest?.text || <span className="hint">Пока ничего</span>}
+          </span>
+          <span className="row-tail">
+            {!expanded && (
+              <Unread
+                count={summary.data?.unread_count ?? 0}
+                label="Непрочитанные объявления"
+              />
+            )}
+            <span className="chevron" aria-hidden="true">
+              {expanded ? "⌃" : "⌄"}
+            </span>
+          </span>
+        </button>
+        <ErrorText text={summary.error} />
+        {expanded && (
+          <Feed
+            path={"/games/" + game.id + "/announcements"}
+            version={version}
+            onLoad={summary.reload}
+            empty="Объявлений нет."
+          />
+        )}
+        {expanded && game.is_owner && (
+          <form
+            className="announce-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void action.run(async () => {
+                await api("/games/" + game.id + "/announcements", "POST", {
+                  text,
+                });
+                setText("");
+                setVersion((v) => v + 1);
+                summary.reload();
+              });
+            }}
+          >
+            <AutoTextarea
+              aria-label="Объявление"
               required
+              minRows={2}
               maxLength={4000}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Например, отправляем подарки до 20 декабря"
+              placeholder="Например: отправляем подарки до 20 декабря"
             />
-          </label>
-          <ErrorText text={action.error} />
-          <button disabled={action.busy}>Отправить участникам</button>
-        </form>
-      )}
-    </section>
+            <ErrorText text={action.error} />
+            <button className="small" disabled={action.busy || !text.trim()}>
+              Отправить всем
+            </button>
+          </form>
+        )}
+      </div>
+    </Section>
   );
 }
+const dayFormat = new Intl.DateTimeFormat("ru", {
+    day: "numeric",
+    month: "long",
+  }),
+  timeFormat = new Intl.DateTimeFormat("ru", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+function dayLabel(date: Date) {
+  const today = new Date(),
+    yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Сегодня";
+  if (date.toDateString() === yesterday.toDateString()) return "Вчера";
+  return dayFormat.format(date);
+}
+const nearBottom = () =>
+  window.innerHeight + window.scrollY >=
+  document.documentElement.scrollHeight - 120;
 function Feed({
   path,
-  polling = true,
   version = 0,
   onLoad,
+  empty = "Сообщений пока нет.",
+  chat = false,
 }: {
   path: string;
-  polling?: boolean;
   version?: number;
   onLoad?: () => void;
+  empty?: string;
+  chat?: boolean;
 }) {
   const [messages, setMessages] = useState<Message[]>([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true);
-  const action = useAction();
+  const action = useAction(),
+    loadRef = useRef<() => Promise<void>>(undefined),
+    stick = useRef(true);
   useEffect(() => {
     let stopped = false,
       busy = false,
       cursor = 0;
     setMessages([]);
     setLoading(true);
+    stick.current = true;
     const load = async () => {
       if (busy || document.hidden) return;
       busy = true;
@@ -884,6 +1131,7 @@ function Feed({
           if (stopped) return;
           if (batch.length) {
             cursor = batch[batch.length - 1].id;
+            stick.current = stick.current || nearBottom();
             setMessages((old) => [...old, ...batch]);
           }
         } while (batch.length === 100);
@@ -899,8 +1147,9 @@ function Feed({
         if (!stopped) setLoading(false);
       }
     };
+    loadRef.current = load;
     void load();
-    const interval = polling ? setInterval(() => void load(), 5000) : undefined;
+    const interval = setInterval(() => void load(), 5000);
     const visible = () => {
       if (!document.hidden) void load();
     };
@@ -910,37 +1159,60 @@ function Feed({
       clearInterval(interval);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [path, polling, version, onLoad]);
+  }, [path, onLoad]);
+  useEffect(() => {
+    if (version) {
+      stick.current = true;
+      void loadRef.current?.();
+    }
+  }, [version]);
+  useEffect(() => {
+    if (chat && stick.current && messages.length) {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      stick.current = false;
+    }
+  }, [chat, messages]);
+  let lastDay = "";
   return (
-    <div className="feed" aria-live="polite">
+    <div className={"feed" + (chat ? " chat-feed" : "")} aria-live="polite">
       <ErrorText text={error || action.error} />
       {loading ? (
         <Loading />
       ) : messages.length === 0 ? (
-        <p className="muted">Сообщений пока нет.</p>
+        <p className="hint feed-empty">{empty}</p>
       ) : (
-        messages.map((m) => (
-          <article key={m.id} className={"bubble " + (m.mine ? "mine" : "")}>
-            <p className="preserve">{m.text}</p>
-            {m.file_key && (
-              <button
-                className="attachment"
-                disabled={action.busy}
-                onClick={() =>
-                  void action.run(() => download(m.file_key!, m.file_name!))
-                }
-              >
-                ↓ {m.file_name}
-              </button>
-            )}
-            <time dateTime={m.created}>
-              {new Date(m.created).toLocaleString("ru", {
-                dateStyle: "short",
-                timeStyle: "short",
-              })}
-            </time>
-          </article>
-        ))
+        messages.map((m) => {
+          const date = new Date(m.created),
+            day = dayLabel(date),
+            separator = day !== lastDay;
+          lastDay = day;
+          return (
+            <div key={m.id} className="message">
+              {separator && <div className="day">{day}</div>}
+              <article className={"bubble" + (m.mine ? " mine" : "")}>
+                {m.text && (
+                  <p className="preserve">
+                    <Linkify text={m.text} />
+                  </p>
+                )}
+                {m.file_key && (
+                  <button
+                    className="attachment"
+                    disabled={action.busy}
+                    onClick={() =>
+                      void action.run(() =>
+                        download(m.file_key!, m.file_name!),
+                      )
+                    }
+                  >
+                    <span aria-hidden="true">📎</span> {m.file_name}
+                  </button>
+                )}
+                <time dateTime={m.created}>{timeFormat.format(date)}</time>
+              </article>
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -949,15 +1221,16 @@ function Delivery({ thread, reload }: { thread: Thread; reload: () => void }) {
   const [tracking, setTracking] = useState(thread.tracking_number),
     action = useAction();
   useEffect(() => setTracking(thread.tracking_number), [thread.tracking_number]);
-  return (
-    <section className="panel delivery">
-      <h2>Доставка подарка</h2>
-      {thread.side === "receiver" ? (
-        <>
-          {thread.received && (
-            <p className="success">Получатель забрал подарок ✓</p>
-          )}
+  if (thread.side === "receiver")
+    return (
+      <div className="delivery">
+        {thread.received ? (
+          <p className="delivery-line ok">
+            ✓ Получатель отметил, что подарок у него
+          </p>
+        ) : (
           <form
+            className="inline-form"
             onSubmit={(event) => {
               event.preventDefault();
               void action.run(async () => {
@@ -968,44 +1241,42 @@ function Delivery({ thread, reload }: { thread: Thread; reload: () => void }) {
               });
             }}
           >
-            <label>
-              Трек-номер
-              <input
-                required
-                maxLength={200}
-                disabled={thread.received}
-                value={tracking}
-                onChange={(event) => setTracking(event.target.value)}
-                placeholder="Введите номер отправления"
-              />
-            </label>
-            <ErrorText text={action.error} />
-            <button
-              className="secondary"
-              disabled={
-                action.busy ||
-                thread.received ||
-                tracking.trim() === thread.tracking_number
-              }
-            >
-              {thread.tracking_number ? "Сохранить новый номер" : "Сохранить номер"}
-            </button>
-          </form>
-        </>
-      ) : (
-        <>
-          <p>
-            {thread.tracking_number ? (
-              <>
-                Трек-номер: <strong>{thread.tracking_number}</strong>
-              </>
-            ) : (
-              <span className="muted">Санта пока не добавил трек-номер.</span>
+            <input
+              aria-label="Трек-номер"
+              required
+              maxLength={200}
+              disabled={thread.read_only}
+              value={tracking}
+              onChange={(event) => setTracking(event.target.value)}
+              placeholder="Трек-номер посылки"
+            />
+            {tracking.trim() !== thread.tracking_number && (
+              <button className="small" disabled={action.busy}>
+                Сохранить
+              </button>
             )}
-          </p>
-          <ErrorText text={action.error} />
+          </form>
+        )}
+        <ErrorText text={action.error} />
+      </div>
+    );
+  return (
+    <div className="delivery">
+      <div className="delivery-row">
+        <span className="delivery-line">
+          {thread.received ? (
+            <span className="ok">✓ Подарок получен</span>
+          ) : thread.tracking_number ? (
+            <>
+              Трек-номер: <strong className="select">{thread.tracking_number}</strong>
+            </>
+          ) : (
+            <span className="hint">Трек-номера пока нет</span>
+          )}
+        </span>
+        {!thread.read_only && (
           <button
-            className={thread.received ? "secondary" : ""}
+            className={"small" + (thread.received ? " secondary" : "")}
             disabled={action.busy}
             onClick={() =>
               void action.run(async () => {
@@ -1016,25 +1287,106 @@ function Delivery({ thread, reload }: { thread: Thread; reload: () => void }) {
               })
             }
           >
-            {thread.received
-              ? "Отменить подтверждение"
-              : "Я забрал(а) подарок ✓"}
+            {thread.received ? "Отменить" : "Подарок получен"}
           </button>
-        </>
+        )}
+      </div>
+      <ErrorText text={action.error} />
+    </div>
+  );
+}
+function Composer({
+  threadKey,
+  onSent,
+}: {
+  threadKey: string;
+  onSent: () => void;
+}) {
+  const [text, setText] = useState(""),
+    [file, setFile] = useState<File>(),
+    action = useAction(),
+    fileInput = useRef<HTMLInputElement>(null),
+    textarea = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = textarea.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 140) + "px";
+  }, [text]);
+  const clearFile = () => {
+    setFile(undefined);
+    if (fileInput.current) fileInput.current.value = "";
+  };
+  const submit = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!text.trim() && !file) return;
+    void action.run(async () => {
+      if (file && file.size > 20 * 1024 * 1024)
+        throw new Error("Файл больше 20 МБ");
+      const body = new FormData();
+      body.set("text", text);
+      if (file) body.set("file", file);
+      await api("/threads/" + threadKey + "/messages", "POST", body);
+      setText("");
+      clearFile();
+      onSent();
+    });
+  };
+  return (
+    <form className="composer" onSubmit={submit}>
+      <ErrorText text={action.error} />
+      {file && (
+        <div className="file-chip">
+          <span>📎 {file.name}</span>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Убрать файл"
+            onClick={clearFile}
+          >
+            ×
+          </button>
+        </div>
       )}
-    </section>
+      <div className="composer-row">
+        <label className="icon-button attach" title="Файл до 20 МБ">
+          <span aria-hidden="true">📎</span>
+          <input
+            ref={fileInput}
+            type="file"
+            aria-label="Прикрепить файл"
+            onChange={(e) => setFile(e.target.files?.[0])}
+          />
+        </label>
+        <textarea
+          ref={textarea}
+          rows={1}
+          aria-label="Сообщение"
+          maxLength={4000}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
+          }}
+          placeholder="Сообщение"
+        />
+        <button
+          className="send"
+          aria-label="Отправить"
+          disabled={action.busy || (!text.trim() && !file)}
+        >
+          ↑
+        </button>
+      </div>
+    </form>
   );
 }
 function Chat({ threadKey, gameId }: { threadKey: string; gameId: string }) {
   const { data, error, reload } = useLoad<Thread[]>(
       "/games/" + gameId + "/threads",
     ),
-    [text, setText] = useState(""),
-    [file, setFile] = useState<File>(),
-    [version, setVersion] = useState(0),
-    action = useAction();
-  const fileInput = useRef<HTMLInputElement>(null),
-    thread = data?.find((t) => t.key === threadKey);
+    [version, setVersion] = useState(0);
+  const thread = data?.find((t) => t.key === threadKey);
   useEffect(() => {
     const visible = () => {
       if (!document.hidden) reload();
@@ -1046,70 +1398,42 @@ function Chat({ threadKey, gameId }: { threadKey: string; gameId: string }) {
       clearInterval(timer);
     };
   }, [reload]);
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    void action.run(async () => {
-      if (file && file.size > 20 * 1024 * 1024)
-        throw new Error("Файл больше 20 МБ");
-      const body = new FormData();
-      body.set("text", text);
-      if (file) body.set("file", file);
-      await api("/threads/" + threadKey + "/messages", "POST", body);
-      setText("");
-      setFile(undefined);
-      if (fileInput.current) fileInput.current.value = "";
-      setVersion((v) => v + 1);
-    });
-  };
   if (!data) return <Loading error={error} retry={reload} />;
   if (!thread) return <ErrorText text="Диалог не найден" />;
+  const isSanta = thread.side === "receiver";
   return (
-    <>
-      <PageTitle
-        eyebrow={thread.game_name + " · РОЗЫГРЫШ №" + thread.round}
-      >
-        {thread.side === "santa"
-          ? "Ваш тайный Санта"
-          : "Получатель: " + thread.counterpart_name}
-      </PageTitle>
-      <p className="muted">
-        {thread.side === "santa"
-          ? "Личность вашего Санты останется секретом."
-          : "Получатель не видит вашего имени. Не раскрывайте себя в сообщениях и файлах."}
-      </p>
+    <div className="chat">
+      <div className="chat-head">
+        <h1>
+          {isSanta ? "🎁 " + thread.counterpart_name : "🎅 Тайный Санта"}
+        </h1>
+        <p className="hint">
+          {isSanta
+            ? "Вы дарите. Ваше имя скрыто, не подписывайтесь."
+            : "Дарит вам. Кто это, не видно."}
+          {" · "}
+          {thread.game_name}
+          {thread.read_only && ", розыгрыш №" + thread.round}
+        </p>
+        <Delivery thread={thread} reload={reload} />
+      </div>
       <ErrorText text={error} />
-      <Delivery thread={thread} reload={reload} />
-      <Feed path={"/threads/" + threadKey + "/messages"} version={version} />
+      <Feed
+        chat
+        path={"/threads/" + threadKey + "/messages"}
+        version={version}
+        empty={
+          isSanta
+            ? "Можно уточнить размер, адрес или что-то по пожеланиям."
+            : "Санта может написать, если что-то уточнить."
+        }
+      />
       {thread.read_only ? (
-        <p className="warning">Архив розыгрыша. Только для чтения.</p>
+        <p className="archive-note">Это архив прошлого розыгрыша, писать сюда нельзя.</p>
       ) : (
-        <form className="composer" onSubmit={submit}>
-          <label>
-            {thread.side === "santa"
-              ? "Сообщение вашему тайному Санте"
-              : "Сообщение для " + thread.counterpart_name}
-            <textarea
-              maxLength={4000}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Спросите о чём-нибудь важном…"
-            />
-          </label>
-          <label className="file-label">
-            Фото, видео, аудио или документ · до 20 МБ
-            <input
-              ref={fileInput}
-              type="file"
-              onChange={(e) => setFile(e.target.files?.[0])}
-            />
-          </label>
-          <ErrorText text={action.error} />
-          <button disabled={action.busy || (!text.trim() && !file)}>
-            {action.busy ? "Отправляем…" : "Отправить ↗"}
-          </button>
-        </form>
+        <Composer threadKey={threadKey} onSent={() => setVersion((v) => v + 1)} />
       )}
-    </>
+    </div>
   );
 }
 function App() {
@@ -1128,6 +1452,12 @@ function App() {
     changed();
     tg?.ready();
     tg?.expand();
+    try {
+      tg?.setHeaderColor?.("secondary_bg_color");
+      tg?.setBackgroundColor?.("secondary_bg_color");
+    } catch {
+      // Older Telegram clients do not support these.
+    }
     const theme = () => {
       document.documentElement.dataset.theme = tg?.colorScheme || "light";
     };
@@ -1149,17 +1479,10 @@ function App() {
   if (!tg?.initData)
     return (
       <main>
-        <PageTitle eyebrow="SECRET SANTA">
-          Подарки начинаются
-          <br />с маленького секрета.
-        </PageTitle>
-        <div className="large-icon" aria-hidden="true">
-          🎁
-        </div>
-        <p>
-          Откройте приложение из Telegram — кнопкой в боте или по приглашению
-          организатора.
-        </p>
+        <PageTitle
+          title="Тайный Санта"
+          subtitle="Откройте приложение через бота в Telegram."
+        />
       </main>
     );
   let page: ReactNode;
@@ -1182,45 +1505,38 @@ function App() {
     default:
       page = <Home />;
   }
+  const inChat = parts[0] === "chat";
   return (
     <>
-      <header>
-        <button className="brand" onClick={() => go("/")}>
-          <span aria-hidden="true">✦</span> SECRET SANTA
-        </button>
-        {path !== "/" && (
-          <button className="text-button" onClick={back}>
-            ← Назад
-          </button>
-        )}
-      </header>
-      <main key={path}>
+      <main key={path} className={inChat ? "in-chat" : undefined}>
         {page}
-        {!notifications && tg.requestWriteAccess && (
+        {!inChat && !notifications && tg.requestWriteAccess && (
           <button
-            className="notification-button"
+            className="link-button notification-button"
             onClick={() =>
               tg?.requestWriteAccess?.((allowed) => setNotifications(allowed))
             }
           >
-            Включить уведомления от бота
+            Разрешить боту присылать уведомления
           </button>
         )}
       </main>
-      <nav aria-label="Основная навигация">
-        <button
-          aria-current={path === "/" ? "page" : undefined}
-          onClick={() => go("/")}
-        >
-          <span aria-hidden="true">✦</span> Мои игры
-        </button>
-        <button
-          aria-current={path === "/profile" ? "page" : undefined}
-          onClick={() => go("/profile")}
-        >
-          <span aria-hidden="true">♡</span> Моя анкета
-        </button>
-      </nav>
+      {!inChat && (
+        <nav aria-label="Основная навигация">
+          <button
+            aria-current={path === "/" ? "page" : undefined}
+            onClick={() => go("/")}
+          >
+            <span aria-hidden="true">🎁</span> Игры
+          </button>
+          <button
+            aria-current={path === "/profile" ? "page" : undefined}
+            onClick={() => go("/profile")}
+          >
+            <span aria-hidden="true">📝</span> Анкета
+          </button>
+        </nav>
+      )}
     </>
   );
 }

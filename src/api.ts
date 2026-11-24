@@ -17,6 +17,9 @@ export interface TelegramApp {
     offClick(fn: () => void): void;
   };
   openTelegramLink(url: string): void;
+  openLink?: (url: string) => void;
+  setHeaderColor?: (color: string) => void;
+  setBackgroundColor?: (color: string) => void;
 }
 declare global {
   interface Window {
